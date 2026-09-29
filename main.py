@@ -1,11 +1,19 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import select
+import os
+import uuid
+import boto3
+from fastapi import File, UploadFile
 
 from src.models.product_model import Product, ProductCategories
 from src.shared.database.session_db import SessionDep
 
 app = FastAPI()
+
+s3_client = boto3.client("s3", region_name="us-east-2")
+S3_BUCKET_NAME = "fastapi-s3-app-bucket"
+ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 
 class CreateProduct(BaseModel):
@@ -52,3 +60,28 @@ def delete_product(product_id: int, session: SessionDep):
         raise HTTPException(status_code=404, detail="Producto no encontrado")
     session.delete(product)
     session.commit()
+
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
+
+@app.post("/images", status_code=201)
+async def upload_image(file: UploadFile = File(...)):
+    if file.content_type not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail="Tipo de archivo no permitido. Solo JPEG, PNG o WEBP.",
+        )
+
+    extension = file.filename.split(".")[-1]
+    key = f"images/{uuid.uuid4()}.{extension}"
+
+    s3_client.upload_fileobj(file.file, S3_BUCKET_NAME, key)
+
+    return {
+        "message": "Imagen subida correctamente",
+        "key": key,
+        "url": f"https://{S3_BUCKET_NAME}.s3.us-east-2.amazonaws.com/{key}",
+    }
